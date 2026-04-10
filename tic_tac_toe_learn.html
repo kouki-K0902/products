@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Tic-Tac-Toe AI Dashboard</title>
+    
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            const errDiv = document.createElement('div');
+            errDiv.style.cssText = 'position:fixed; top:0; left:0; width:100%; background:rgba(255,0,0,0.9); color:white; padding:20px; z-index:9999; font-family:monospace; font-size:16px;';
+            errDiv.innerHTML = `<b>エラーが発生しました：</b><br><br>${message}<br>行番号: ${lineno}`;
+            document.body.appendChild(errDiv);
+            return true;
+        };
+        window.process = { env: { NODE_ENV: 'production' } };
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/3d-force-graph@1.73.3/dist/3d-force-graph.min.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body { margin: 0; padding: 0; background-color: #050510; color: white; font-family: 'Segoe UI', Tahoma, sans-serif; display: flex; height: 100vh; overflow: hidden; }
+        #left-panel { width: 450px; background-color: #111116; border-right: 1px solid #333; display: flex; flex-direction: column; z-index: 10; }
+        .header { padding: 15px 20px; border-bottom: 1px solid #222; }
+        .header h2 { margin: 0; font-size: 18px; color: #ff3333; }
+        .controls { padding: 20px; display: flex; flex-direction: column; gap: 15px; border-bottom: 1px solid #222; }
+        .control-row { display: flex; align-items: center; justify-content: space-between; }
+        .control-row label { font-size: 13px; color: #aaa; width: 120px; }
+        .control-row input[type="range"] { flex: 1; }
+        .control-row span { font-size: 13px; color: #fff; width: 40px; text-align: right; }
+        button { background: #2c5d8f; color: white; border: none; padding: 12px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 15px; }
+        button.paused { background: #aa3333; }
+        .stats-box { background: #000; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 13px; color: #ff3333; margin-bottom: 10px; line-height: 1.5; }
+        #chart-container { flex: 1; padding: 10px; position: relative; min-height: 250px; width: 100%; box-sizing: border-box; }
+        #right-panel { flex: 1; position: relative; }
+        #3d-graph { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        .overlay-title { position: absolute; top: 20px; left: 20px; font-size: 16px; color: rgba(255,255,255,0.7); pointer-events: none; z-index: 10; }
+        .node-tooltip { font-family: monospace; font-size: 16px; text-align: center; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; border: 1px solid #ff3333; }
+    </style>
+</head>
+<body>
+
+    <div id="left-panel">
+        <div class="header"><h2>AI Training Monitor</h2></div>
+        <div class="controls">
+            <button id="play-btn" onclick="togglePause()">⏸ Pause</button>
+            <div class="control-row">
+                <label>Epsilon P1</label>
+                <input type="range" id="eps1" min="0" max="1" step="0.01" value="0.8">
+                <span id="eps1-val">0.80</span>
+            </div>
+            <div class="control-row">
+                <label>Epsilon P2</label>
+                <input type="range" id="eps2" min="0" max="1" step="0.01" value="0.8">
+                <span id="eps2-val">0.80</span>
+            </div>
+            <div class="control-row">
+                <label>Delay (ms)</label>
+                <input type="range" id="speed" min="0" max="500" step="10" value="100">
+                <span id="speed-val">100</span>
+            </div>
+            <div class="stats-box" id="stats">Episode: 0<br>Cumulative Rate: 0<br>Q-Table Nodes: 0</div>
+        </div>
+        <div id="chart-container"><canvas id="winRateChart"></canvas></div>
+    </div>
+    <div id="right-panel">
+        <div class="overlay-title">AI Brain Network (Real-time Expansion)</div>
+        <div id="3d-graph"></div>
+    </div>
+
+    <script>
+    window.addEventListener('load', function() {
+        function rot90(arr, k) {
+            k = ((k % 4) + 4) % 4; let res = [...arr];
+            for (let step = 0; step < k; step++) {
+                let temp = [...res];
+                res[0]=temp[2]; res[1]=temp[5]; res[2]=temp[8];
+                res[3]=temp[1]; res[4]=temp[4]; res[5]=temp[7];
+                res[6]=temp[0]; res[7]=temp[3]; res[8]=temp[6];
+            } return res;
+        }
+        function fliplr(arr) { return [arr[2],arr[1],arr[0],arr[5],arr[4],arr[3],arr[8],arr[7],arr[6]]; }
+        function compareArrays(a, b) { for(let i=0;i<a.length;i++){ if(a[i]>b[i]) return 1; if(a[i]<b[i]) return -1; } return 0; }
+
+        class TicTacToe {
+            constructor() { this.reset(); }
+            reset() { this.board = new Array(9).fill(0); this.players = [1, -1]; this.turn = 0; this.result = null; }
+            get role() { return this.players[this.turn % 2]; }
+            update_turn() { this.turn += 1; }
+            setPiece(role, pos) { if (this.board[pos] !== 0) return false; this.board[pos] = role; return true; }
+            judge() {
+                let b = this.board;
+                let all = [b[0]+b[1]+b[2], b[3]+b[4]+b[5], b[6]+b[7]+b[8], b[0]+b[3]+b[6], b[1]+b[4]+b[7], b[2]+b[5]+b[8], b[0]+b[4]+b[8], b[2]+b[4]+b[6]];
+                if (all.includes(3)) return 1; if (all.includes(-3)) return -1; if (this.turn === 8) return 0; return null;
+            }
+            round(pos) {
+                if (!this.setPiece(this.role, pos)) return { result: null, done: false, regal: false };
+                this.result = this.judge(); return { result: this.result, done: this.result !== null, regal: true };
+            }
+        }
+
+        class Agent {
+            constructor(role, game, e_greedy) { this.role = role; this.game = game; this.e_greedy = e_greedy; this.data = {}; this.logs = []; }
+            get_deformed_board(standard_probs, operation) { let temp = [...standard_probs]; if (operation[1]) temp = fliplr(temp); return rot90(temp, -operation[0]); }
+            get_formed_board(deformed_probs, operation) { let temp = [...deformed_probs]; temp = rot90(temp, operation[0]); if (operation[1]) temp = fliplr(temp); return temp; }
+            get_standard_board() {
+                let max_b = null, best_op = null;
+                for (let i = 0; i < 4; i++) {
+                    let r = rot90(this.game.board, i); if (!max_b || compareArrays(r, max_b) > 0) { max_b = r; best_op = [i, false]; }
+                    let f = fliplr(r); if (compareArrays(f, max_b) > 0) { max_b = f; best_op = [i, true]; }
+                } return { standard_board: max_b, operation: best_op };
+            }
+            estimate_pos(standard_board, operation) {
+                let sb_str = standard_board.join(',');
+                if (!this.data[sb_str]) { this.data[sb_str] = new Array(9).fill(0); }
+                let deformed_probs = this.get_deformed_board(this.data[sb_str], operation);
+                let valid = []; for(let i=0; i<9; i++) if(this.game.board[i] === 0) valid.push(i);
+                
+                let weights = valid.map(i => deformed_probs[i]); let max_w = Math.max(...weights);
+                let exp_w = weights.map(w => Math.exp(w - max_w) || 0.1); let sum_exp = exp_w.reduce((a,b)=>a+b, 0);
+                let probs = exp_w.map(e => e / sum_exp);
+
+                if (Math.random() < this.e_greedy) return valid[Math.floor(Math.random() * valid.length)];
+                
+                let r = Math.random(), cum = 0;
+                for (let i = 0; i < valid.length; i++) { cum += probs[i]; if (r <= cum) return valid[i]; }
+                return valid[valid.length - 1];
+            }
+            action() {
+                let { standard_board, operation } = this.get_standard_board();
+                let pos = this.estimate_pos(standard_board, operation);
+                let log_obj = {}; log_obj[standard_board.join(',')] = [operation, pos];
+                this.logs.push(log_obj); return this.game.round(pos);
+            }
+            learn(result) {
+                let next_max = 0; 
+                for (let idx = this.logs.length - 1; idx >= 0; idx--) {
+                    let item = this.logs[idx]; let k_str = Object.keys(item)[0]; let k_arr = k_str.split(',').map(Number);
+                    let op = item[k_str][0]; let pos = item[k_str][1];
+                    let def_b = this.get_deformed_board(k_arr, op);
+                    let def_p = this.get_deformed_board(this.data[k_str], op);
+
+                    if (result === 0) def_p[pos] += 0; else if (this.role === result) def_p[pos] += 1; else def_p[pos] -= 1;
+
+
+                    let v = []; for(let i=0; i<9; i++) if(def_b[i] === 0) v.push(i);
+                    next_max = v.length > 0 ? Math.max(...v.map(i => def_p[i])) : 0;
+                    this.data[k_str] = this.get_formed_board(def_p, op);
+                }
+                this.logs = [];
+            }
+        }
+
+        window.isPaused = false;
+        window.learningSpeed = 100;
+        let episode = 0, cumulative_score = 0;
+        let all_boards_set = new Set();
+        const gData = { nodes: [], links: [] }, nodeSet = new Set(), linkSet = new Set();
+        
+        // 描画関連の変数
+        let currentPathNodes = new Set(), currentPathLinks = new Set(), currentPathHistory = [];
+        let isPlayingGame = false;
+
+        function getBoardHTML(arr) {
+            const sym = {1: '〇', '-1': '✕', 0: '・'};
+            return `${sym[arr[0]]} ${sym[arr[1]]} ${sym[arr[2]]}<br>${sym[arr[3]]} ${sym[arr[4]]} ${sym[arr[5]]}<br>${sym[arr[6]]} ${sym[arr[7]]} ${sym[arr[8]]}`;
+        }
+
+        const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+            .graphData(gData).dagMode('td').dagLevelDistance(60)
+            .nodeLabel(node => `<div class="node-tooltip">${getBoardHTML(node.id.split(',').map(Number))}</div>`)
+            .nodeColor(n => currentPathNodes.has(n.id) ? '#ff3333' : '#bbbbbb')
+            .nodeRelSize(n => currentPathNodes.has(n.id) ? 6 : 3)
+            .linkColor(l => currentPathLinks.has(`${typeof l.source==='object'?l.source.id:l.source}->${typeof l.target==='object'?l.target.id:l.target}`) ? '#ff3333' : '#cccccc')
+            .linkWidth(l => currentPathLinks.has(`${typeof l.source==='object'?l.source.id:l.source}->${typeof l.target==='object'?l.target.id:l.target}`) ? 4 : 1.5)
+            .backgroundColor('#050510');
+
+        const ctx = document.getElementById('winRateChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line', 
+            data: { labels: [], datasets: [{ label: 'P1 Cumulative Score', borderColor: '#ff3333', data: [], fill: false, borderWidth: 2 }] },
+            options: { 
+                responsive: true, maintainAspectRatio: false, animation: false, elements: { point:{ radius: 0 } },
+                plugins: { legend: { labels: { color: 'white' } } },
+                scales: { x: { ticks: { color: '#aaa' }, grid: { color: '#333' } }, y: { ticks: { color: '#aaa' }, grid: { color: '#333' } } }
+            }
+        });
+
+        const game = new TicTacToe();
+        const agent1 = new Agent(1, game, 0.8), agent2 = new Agent(-1, game, 0.8);
+
+        document.getElementById('eps1').addEventListener('input', e => { agent1.e_greedy = parseFloat(e.target.value); document.getElementById('eps1-val').innerText = agent1.e_greedy.toFixed(2); });
+        document.getElementById('eps2').addEventListener('input', e => { agent2.e_greedy = parseFloat(e.target.value); document.getElementById('eps2-val').innerText = agent2.e_greedy.toFixed(2); });
+        document.getElementById('speed').addEventListener('input', e => { window.learningSpeed = parseInt(e.target.value); document.getElementById('speed-val').innerText = window.learningSpeed; });
+
+        window.togglePause = function() {
+            window.isPaused = !window.isPaused;
+            const btn = document.getElementById('play-btn');
+            if (window.isPaused) { btn.innerText = '▶ Play'; btn.classList.add('paused'); } 
+            else { btn.innerText = '⏸ Pause'; btn.classList.remove('paused'); trainingLoop(); }
+        }
+
+        function updateChartAndStats() {
+            chart.data.labels.push(episode);
+            chart.data.datasets[0].data.push(cumulative_score);
+            if (chart.data.labels.length > 200) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update();
+            document.getElementById('stats').innerHTML = `Episode: ${episode}<br>Cumulative Rate: ${cumulative_score}<br>Q-Table Nodes: ${all_boards_set.size}`;
+        }
+
+        function trainingLoop() {
+            if (window.isPaused) return;
+
+            try {
+                if (window.learningSpeed === 0) {
+                    // 超高速モード
+                    let batchSize = 50; 
+                    let isTopologyDirty = false;
+                    
+                    currentPathNodes.clear(); 
+                    currentPathLinks.clear();
+
+                    for (let b = 0; b < batchSize; b++) {
+                        game.reset(); 
+                        let done = false, history = [];
+                        while (!done) {
+                            let { standard_board } = (game.role === 1 ? agent1 : agent2).get_standard_board();
+                            history.push(standard_board.join(','));
+                            let res = game.role === agent1.role ? agent1.action() : agent2.action();
+                            if (res.regal) game.update_turn(); else break;
+                            done = res.done;
+                            if (done) { let final_sb = (game.role === 1 ? agent1 : agent2).get_standard_board().standard_board; history.push(final_sb.join(',')); }
+                        }
+                        agent1.learn(game.result); agent2.learn(game.result);
+                        cumulative_score += (game.result === 1 ? 1 : (game.result === -1 ? -1 : 0));
+                        episode++;
+
+                        for (let i = 0; i < history.length; i++) {
+                            let nId = history[i];
+                            all_boards_set.add(nId);
+                            if (!nodeSet.has(nId)) { nodeSet.add(nId); gData.nodes.push({ id: nId }); isTopologyDirty = true; }
+                            
+                            if (i > 0) {
+                                let pId = history[i-1];
+                                // 🚀【修正】自己ループ（循環）を確実にブロックする安全装置
+                                if (pId !== nId) {
+                                    let lId = `${pId}->${nId}`;
+                                    if (!linkSet.has(lId)) { linkSet.add(lId); gData.links.push({ source: pId, target: nId }); isTopologyDirty = true; }
+                                }
+                            }
+                        }
+                    }
+
+                    updateChartAndStats();
+
+                    if (isTopologyDirty) { Graph.graphData({ nodes: gData.nodes, links: gData.links }); }
+                    requestAnimationFrame(trainingLoop);
+
+                } else {
+                    // 通常・低速モード
+                    let isTopologyDirty = false;
+
+                    if (!isPlayingGame) {
+                        game.reset();
+                        currentPathHistory = [];
+                        currentPathNodes.clear();
+                        currentPathLinks.clear();
+                        isPlayingGame = true;
+                    }
+
+                    let { standard_board } = (game.role === 1 ? agent1 : agent2).get_standard_board();
+                    let sb_str = standard_board.join(',');
+                    currentPathHistory.push(sb_str);
+                    currentPathNodes.add(sb_str);
+                    all_boards_set.add(sb_str);
+
+                    if (!nodeSet.has(sb_str)) { nodeSet.add(sb_str); gData.nodes.push({ id: sb_str }); isTopologyDirty = true; }
+                    
+                    if (currentPathHistory.length > 1) {
+                        let pId = currentPathHistory[currentPathHistory.length - 2];
+                        // 🚀【修正】自己ループ（循環）を確実にブロックする安全装置
+                        if (pId !== sb_str) {
+                            let lId = `${pId}->${sb_str}`;
+                            currentPathLinks.add(lId);
+                            if (!linkSet.has(lId)) { linkSet.add(lId); gData.links.push({ source: pId, target: sb_str }); isTopologyDirty = true; }
+                        }
+                    }
+
+                    let res = game.role === agent1.role ? agent1.action() : agent2.action();
+                    if (res.regal) game.update_turn(); else res.done = true;
+
+                    if (res.done) {
+                        let final_sb_str = (game.role === 1 ? agent1 : agent2).get_standard_board().standard_board.join(',');
+                        currentPathHistory.push(final_sb_str); currentPathNodes.add(final_sb_str); all_boards_set.add(final_sb_str);
+                        if (!nodeSet.has(final_sb_str)) { nodeSet.add(final_sb_str); gData.nodes.push({ id: final_sb_str }); isTopologyDirty = true; }
+                        
+                        let pId = currentPathHistory[currentPathHistory.length - 2];
+                        // 🚀【修正】自己ループ（循環）を確実にブロックする安全装置
+                        if (pId !== final_sb_str) {
+                            let lId = `${pId}->${final_sb_str}`;
+                            currentPathLinks.add(lId);
+                            if (!linkSet.has(lId)) { linkSet.add(lId); gData.links.push({ source: pId, target: final_sb_str }); isTopologyDirty = true; }
+                        }
+                        
+                        agent1.learn(game.result); agent2.learn(game.result);
+                        cumulative_score += (game.result === 1 ? 1 : (game.result === -1 ? -1 : 0));
+                        episode++;
+
+                        updateChartAndStats();
+                        isPlayingGame = false;
+                    }
+
+                    if (isTopologyDirty) {
+                        Graph.graphData({ nodes: gData.nodes, links: gData.links });
+                    } else {
+                        Graph.nodeColor(Graph.nodeColor()).linkColor(Graph.linkColor()).nodeRelSize(Graph.nodeRelSize()).linkWidth(Graph.linkWidth());
+                    }
+
+                    setTimeout(trainingLoop, window.learningSpeed);
+                }
+            } catch (e) {
+                throw new Error("学習ループ内でエラーが発生しました: " + e.message);
+            }
+        }
+
+        setTimeout(trainingLoop, 500);
+    });
+    </script>
+</body>
+</html>
