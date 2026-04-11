@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Stats Clicker Prototype</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; }
+        #container { display: flex; gap: 20px; width: 90%; max-width: 1000px; margin-top: 20px; }
+        .column { flex: 1; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        textarea { width: 100%; height: 200px; font-family: monospace; background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 5px; }
+        #game-canvas { border: 2px solid #333; background: #fff; width: 100%; height: 150px; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin-bottom: 10px; }
+        #plot { width: 100%; margin-top: 10px; }
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #ccc; }
+        .label { font-weight: bold; margin-bottom: 5px; display: block; }
+    </style>
+</head>
+<body>
+
+    <h1>Stats Clicker: Python Logic</h1>
+    <div id="status">Pyodide (Python) ロード中...</div>
+
+    <div id="container">
+        <div class="column">
+            <span class="label">Python Strategy (numpy利用可):</span>
+            <textarea id="code-editor">
+import numpy as np
+
+def get_interval():
+    # 指数分布で「ランダムな間隔」を作る
+    # 平均 0.5秒間隔
+    avg = 0.5
+    return np.random.exponential(avg)
+            </textarea>
+            <button id="run-btn" onclick="updateStrategy()" disabled>戦略を反映して実行</button>
+            <div id="plot"></div>
+        </div>
+
+        <div class="column">
+            <span class="label">Game Screen:</span>
+            <div id="game-canvas">Score: <span id="score">0</span></div>
+            <p>現在の設定で自動クリック中...</p>
+            <hr>
+            <p><small>※指数分布だと「連打」と「待ち」が不規則に発生します。正規分布 (np.random.normal) に書き換えてみてください。</small></p>
+        </div>
+    </div>
+
+    <script>
+        let pyodide;
+        let score = 0;
+        let nextClickTimeout;
+
+        async function init() {
+            pyodide = await loadPyodide();
+            await pyodide.loadPackage(["numpy", "matplotlib"]);
+            document.getElementById('status').innerText = "✅ Python準備完了";
+            document.getElementById('run-btn').disabled = false;
+            updateStrategy(); // 初回実行
+        }
+
+        async function updateStrategy() {
+            const code = document.getElementById('code-editor').value;
+            try {
+                // 1. ユーザーのコードを定義
+                await pyodide.runPythonAsync(code);
+                
+                // 2. 分布の可視化 (シミュレーション1000回)
+                await pyodide.runPythonAsync(`
+                    import matplotlib.pyplot as plt
+                    import io, base64
+                    
+                    samples = [get_interval() for _ in range(1000)]
+                    plt.figure(figsize=(4,3))
+                    plt.hist(samples, bins=30, color='skyblue', edgecolor='black')
+                    plt.title("Expected Interval Distribution")
+                    
+                    buf = io.BytesIO()
+                    plt.savefig(buf, format='png')
+                    img_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+                    plt.close()
+                `);
+                
+                const imgData = pyodide.globals.get("img_str");
+                document.getElementById('plot').innerHTML = `<img src="data:image/png;base64,${imgData}" style="width:100%">`;
+
+                // 3. ゲームループ開始
+                planNextClick();
+            } catch (err) {
+                alert("Python Error: " + err);
+            }
+        }
+
+        function planNextClick() {
+            clearTimeout(nextClickTimeout);
+            
+            // Python側から次の間隔を取得
+            const interval = pyodide.runPython("get_interval()");
+            
+            nextClickTimeout = setTimeout(() => {
+                score++;
+                document.getElementById('score').innerText = score;
+                // クリック時の演出
+                document.getElementById('game-canvas').style.background = "#ffffcc";
+                setTimeout(() => { document.getElementById('game-canvas').style.background = "#fff"; }, 50);
+                
+                planNextClick(); // 次のクリックを予約
+            }, interval * 1000); // 秒をミリ秒に変換
+        }
+
+        init();
+    </script>
+</body>
+</html>
