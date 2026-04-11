@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Fisher's Farm: Harvest Simulation</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; padding: 20px; }
+        #main-container { display: flex; gap: 20px; width: 100%; max-width: 1200px; }
+        .panel { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); flex: 1; }
+        #farm-grid { 
+            display: grid; grid-template-columns: repeat(8, 55px); grid-template-rows: repeat(8, 55px); 
+            gap: 3px; border: 5px solid #333; background: #ddd; margin: 0 auto;
+        }
+        .cell { 
+            width: 55px; height: 55px; display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            font-weight: bold; position: relative; border-radius: 2px;
+        }
+        .sunny { background-color: #fffde7; }
+        .shady { background-color: #eceff1; }
+        .water-edge::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 10px; background: #29b6f6; opacity: 0.6; }
+        
+        .yield-badge { font-size: 0.7em; color: #555; margin-top: 2px; }
+        textarea { width: 100%; height: 300px; font-family: 'Consolas', monospace; background: #282c34; color: #61afef; padding: 15px; border-radius: 8px; border: none; }
+        
+        .controls { display: flex; gap: 10px; margin-top: 10px; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 15px; transition: 0.2s; }
+        #plant-btn { background: #4caf50; color: white; }
+        #harvest-btn { background: #ff9800; color: white; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        
+        #log-panel { margin-top: 20px; width: 100%; max-height: 200px; overflow-y: auto; background: #eee; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+<h1>Fisher's Farm: 収穫シミュレーション</h1>
+<div id="status">Python読み込み中...</div>
+
+<div id="main-container">
+    <div class="panel">
+        <h3>1. 植え付けアルゴリズム設定</h3>
+        <textarea id="python-code">
+import numpy as np
+
+def decide_planting(farm_data):
+    # farm_data: 各マスの環境設定が入った辞書のリスト
+    plan = []
+    for plot in farm_data:
+        # 戦略を記述（例：ランダムに植える）
+        variety = np.random.choice(['A', 'B', 'C'])
+        plan.append(variety)
+    return plan
+
+def calculate_harvest(plot):
+    # 各マスの収穫量を計算するロジック
+    # plot['variety']: 品種, plot['is_sunny']: 日当たり, plot['is_water']: 水辺
+    
+    base = 50.0
+    v = plot['variety']
+    
+    # 品種ごとの基本特性
+    effects = {'A': 10, 'B': 25, 'C': 5}
+    res = base + effects.get(v, 0)
+    
+    # 環境との相互作用 (Interaction)
+    if v == 'B' and plot['is_water']:
+        res -= 35  # 品種Bは水辺に極端に弱い（根腐れ）
+    elif v == 'B' and plot['is_sunny']:
+        res += 10  # 品種Bは日向で本領発揮
+    
+    # 統計的ノイズ (平均0, 標準偏差5の正規分布)
+    noise = np.random.normal(0, 5)
+    
+    return round(res + noise, 2)
+        </textarea>
+        
+        <div class="controls">
+            <button id="plant-btn" onclick="executePlanting()" disabled>植え付け実行</button>
+            <button id="harvest-btn" onclick="executeHarvest()" disabled>収穫する！</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>2. 農園盤面</h3>
+        <div id="farm-grid"></div>
+        <div id="log-panel">ここに収穫ログが表示されます...</div>
+    </div>
+</div>
+
+<script>
+    let pyodide;
+    const GRID_SIZE = 8;
+    let farmPlots = [];
+
+    async function setup() {
+        pyodide = await loadPyodide();
+        await pyodide.loadPackage("numpy");
+        document.getElementById('status').innerText = "✅ Python準備完了";
+        document.getElementById('plant-btn').disabled = false;
+        initFarm();
+    }
+
+    function initFarm() {
+        farmPlots = [];
+        const gridEl = document.getElementById('farm-grid');
+        gridEl.innerHTML = '';
+        
+        for (let y = 0; y < GRID_SIZE; y++) {
+            for (let x = 0; x < GRID_SIZE; x++) {
+                const plot = {
+                    id: y * GRID_SIZE + x,
+                    is_sunny: y < 4,
+                    is_water: x < 2,
+                    variety: null,
+                    yield: null
+                };
+                farmPlots.push(plot);
+                
+                const cell = document.createElement('div');
+                cell.id = `cell-${plot.id}`;
+                cell.className = `cell ${plot.is_sunny ? 'sunny' : 'shady'} ${plot.is_water ? 'water-edge' : ''}`;
+                gridEl.appendChild(cell);
+            }
+        }
+    }
+
+    async function executePlanting() {
+        const code = document.getElementById('python-code').value;
+        try {
+            pyodide.globals.set("js_farm_data", farmPlots);
+            await pyodide.runPythonAsync(code);
+            
+            const plan = pyodide.runPython("decide_planting(js_farm_data.to_py())").toJs();
+            
+            farmPlots.forEach((p, i) => {
+                p.variety = plan[i];
+                p.yield = null; // 植え付け時は収穫量をリセット
+                const el = document.getElementById(`cell-${i}`);
+                el.innerHTML = `<span>${p.variety}</span>`;
+            });
+            
+            document.getElementById('harvest-btn').disabled = false;
+            document.getElementById('log-panel').innerText = "植え付け完了。収穫ボタンを押して結果を確認してください。";
+        } catch (e) { alert(e); }
+    }
+
+    async function executeHarvest() {
+        let totalYield = 0;
+        let logs = ["【収穫データ】"];
+        
+        farmPlots.forEach((p, i) => {
+            // 各マスのデータをPythonに渡して計算
+            pyodide.globals.set("current_plot", p);
+            const y = pyodide.runPython("calculate_harvest(current_plot.to_py())");
+            
+            p.yield = y;
+            totalYield += y;
+            
+            // 盤面表示を更新
+            const el = document.getElementById(`cell-${i}`);
+            el.innerHTML = `<span>${p.variety}</span><span class="yield-badge">${y}</span>`;
+            logs.push(`地点${i}(${p.variety}): ${y}`);
+        });
+
+        document.getElementById('log-panel').innerText = 
+            `合計収穫量: ${totalYield.toFixed(2)}\n平均収穫量: ${(totalYield/64).toFixed(2)}\n\n` + logs.join("\n");
+    }
+
+    setup();
+</script>
+</body>
+</html>
