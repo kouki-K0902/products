@@ -1,55 +1,90 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GitHub Python Runner</title>
+    <meta charset="UTF-8">
+    <title>Python Code Runner</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
-        textarea { width: 100%; height: 100px; margin-bottom: 10px; }
-        #output { background: #f4f4f4; padding: 10px; border-radius: 5px; white-space: pre-wrap; }
-        button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; }
-        button:disabled { background: #ccc; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+        h1 { color: #333; }
+        /* エディタ風のスタイル */
+        textarea { 
+            width: 100%; height: 250px; 
+            font-family: 'Courier New', Courier, monospace; 
+            background-color: #1e1e1e; color: #d4d4d4; 
+            padding: 15px; border-radius: 8px; font-size: 14px;
+            box-sizing: border-box; resize: vertical;
+        }
+        button { 
+            margin-top: 10px; padding: 12px 24px; font-size: 16px; 
+            background-color: #28a745; color: white; border: none; 
+            border-radius: 5px; cursor: pointer; transition: background 0.3s;
+        }
+        button:hover { background-color: #218838; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        #output { 
+            margin-top: 20px; padding: 15px; 
+            background: #f8f9fa; border-left: 5px solid #28a745; 
+            white-space: pre-wrap; font-family: monospace; min-height: 50px;
+        }
+        .status { color: #666; font-size: 0.9em; margin-bottom: 5px; }
     </style>
 </head>
 <body>
 
-    <h2>ブラウザでPython実行 (Pyodide)</h2>
+    <h1>Python Web Runner</h1>
+    <div class="status" id="status">Pyodideを読み込み中... (20MB程度のDLが発生します)</div>
     
-    <p>数値を入力してください（Pythonで2乗を計算します）:</p>
-    <input type="number" id="userInput" value="5">
-    <button id="runButton" onclick="runPython()" disabled>準備中...</button>
+    <textarea id="codeEditor" placeholder="ここにPythonコードを書いてください...">
+import math
 
-    <h3>実行結果:</h3>
-    <div id="output">Pyodideを読み込んでいます...</div>
+def circle_area(radius):
+    return math.pi * (radius ** 2)
+
+print(f"半径5の円の面積は: {circle_area(5)}")
+</textarea>
+
+    <button id="runButton" onclick="evaluatePython()" disabled>実行する</button>
+
+    <h3>実行結果 (標準出力):</h3>
+    <div id="output">準備ができるまでお待ちください...</div>
 
     <script>
         let pyodide;
 
-        // 1. Pyodideの初期化
-        async function setup() {
-            pyodide = await loadPyodide();
-            document.getElementById('runButton').disabled = false;
-            document.getElementById('runButton').innerText = 'Pythonを実行';
-            document.getElementById('output').innerText = '準備完了！';
-        }
-        setup();
-
-        // 2. ボタンを押した時の処理
-        async function runPython() {
-            const val = document.getElementById('userInput').value;
-            
+        async function init() {
             try {
-                // JSの変数をPython側に渡して実行
-                pyodide.globals.set("input_val", val);
-                let result = await pyodide.runPythonAsync(`
-                    # ここにPythonコードを書く
-                    num = int(input_val)
-                    f"入力された {num} の2乗は {num**2} です。"
+                pyodide = await loadPyodide();
+                document.getElementById('status').innerText = "✅ 準備完了！自由にコードを入力してください。";
+                document.getElementById('runButton').disabled = false;
+                document.getElementById('output').innerText = "ここに実行結果が表示されます。";
+            } catch (e) {
+                document.getElementById('output').innerText = "初期化エラー: " + e;
+            }
+        }
+        init();
+
+        async function evaluatePython() {
+            const code = document.getElementById('codeEditor').value;
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerText = "実行中...";
+
+            try {
+                // Pythonの標準出力をJavaScriptで受け取るための設定
+                pyodide.runPython(`
+                    import sys
+                    import io
+                    sys.stdout = io.StringIO()
                 `);
-                
-                document.getElementById('output').innerText = result;
+
+                // ユーザーコードの実行
+                await pyodide.runPythonAsync(code);
+
+                // 標準出力の結果を取得
+                const stdout = pyodide.runPython("sys.stdout.getvalue()");
+                outputDiv.innerText = stdout || "（出力なし）";
             } catch (err) {
-                document.getElementById('output').innerText = "エラー: " + err;
+                outputDiv.innerText = "エラー発生:\n" + err;
             }
         }
     </script>
