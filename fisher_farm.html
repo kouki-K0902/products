@@ -1,172 +1,308 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Fisher's Farm: Harvest Simulation</title>
+    <title>Fisher's Farm: Data Science Lab</title>
+    
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/python/python.min.js"></script>
+
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; padding: 20px; }
-        #main-container { display: flex; gap: 20px; width: 100%; max-width: 1200px; }
-        .panel { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); flex: 1; }
-        #farm-grid { 
-            display: grid; grid-template-columns: repeat(8, 55px); grid-template-rows: repeat(8, 55px); 
-            gap: 3px; border: 5px solid #333; background: #ddd; margin: 0 auto;
-        }
-        .cell { 
-            width: 55px; height: 55px; display: flex; flex-direction: column; align-items: center; justify-content: center; 
-            font-weight: bold; position: relative; border-radius: 2px;
-        }
+        :root { --primary-color: #2c3e50; --accent-color: #3498db; --bg-color: #f4f7f9; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg-color); margin: 0; padding: 20px; }
+        #main-container { display: flex; gap: 20px; max-width: 1400px; margin: 0 auto; min-height: 95vh; }
+        
+        .left-side { flex: 1.3; display: flex; flex-direction: column; }
+        .tab-container { display: flex; }
+        .tab { padding: 12px 25px; cursor: pointer; background: #cfd8dc; border-radius: 10px 10px 0 0; margin-right: 5px; font-weight: bold; color: #546e7a; transition: 0.3s; }
+        .tab.active { background: #282c34; color: #61afef; }
+        .editor-wrapper { background: #282c34; border-radius: 0 10px 10px 10px; padding: 10px; flex-grow: 1; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .CodeMirror { height: 500px; font-family: 'Fira Code', monospace; font-size: 14px; border-radius: 5px; }
+
+        .right-side { flex: 0.7; display: flex; flex-direction: column; gap: 15px; }
+        .panel { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); position: relative; }
+
+        #farm-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; border: 4px solid var(--primary-color); background: #bdc3c7; width: 400px; margin: 0 auto; position: relative; }
+        .cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; position: relative; font-size: 18px; cursor: help; }
         .sunny { background-color: #fffde7; }
-        .shady { background-color: #eceff1; }
-        .water-edge::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 10px; background: #29b6f6; opacity: 0.6; }
-        
-        .yield-badge { font-size: 0.7em; color: #555; margin-top: 2px; }
-        textarea { width: 100%; height: 300px; font-family: 'Consolas', monospace; background: #282c34; color: #61afef; padding: 15px; border-radius: 8px; border: none; }
-        
-        .controls { display: flex; gap: 10px; margin-top: 10px; }
-        button { flex: 1; padding: 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 15px; transition: 0.2s; }
-        #plant-btn { background: #4caf50; color: white; }
-        #harvest-btn { background: #ff9800; color: white; }
+        .shady { background-color: #e0e0e0; }
+        .water-edge::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 6px; background: #29b6f6; opacity: 0.7; }
+        .yield-val { font-size: 10px; color: #e67e22; margin-top: 2px; }
+
+        .cell .tooltip { visibility: hidden; width: 160px; background-color: rgba(44, 62, 80, 0.98); color: #fff; text-align: left; padding: 10px; border-radius: 6px; position: absolute; z-index: 9999; opacity: 0; transition: opacity 0.2s; font-size: 11px; line-height: 1.4; pointer-events: none; }
+        .cell .tooltip.top { bottom: 115%; left: 50%; margin-left: -80px; }
+        .cell .tooltip.bottom { top: 115%; left: 50%; margin-left: -80px; }
+        .cell:hover { z-index: 100; } 
+        .cell:hover .tooltip { visibility: visible; opacity: 1; }
+
+        .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px; }
+        button { flex: 1; min-width: 120px; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        .btn-plant { background: #4caf50; }
+        .btn-harvest { background: #ff9800; }
+        .btn-analyze { background: #2196f3; }
+        .btn-csv { background: #607d8b; }
         button:disabled { background: #ccc; cursor: not-allowed; }
+
+        #console { background: #21252b; color: #98c379; padding: 15px; border-radius: 8px; font-family: 'Consolas', monospace; font-size: 13px; min-height: 100px; white-space: pre-wrap; margin-top: 10px; }
         
-        #log-panel { margin-top: 20px; width: 100%; max-height: 200px; overflow-y: auto; background: #eee; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 0.9em; }
+        /* グラフコンテナのスタイル */
+        .plot-item { margin-top: 20px; border: 2px solid #ecf0f1; border-radius: 8px; background: white; overflow: hidden; }
+        .plot-actions { background: #f8f9fa; padding: 10px; border-bottom: 1px solid #eee; display: flex; gap: 10px; align-items: center; }
+        .plot-btn-del { background: #e74c3c !important; color: white; border: none; padding: 6px 15px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; flex: 0 0 auto; min-width: auto; }
+        .plot-btn-save { background: #34495e !important; color: white; border: none; padding: 6px 15px; border-radius: 4px; cursor: pointer; font-size: 12px; flex: 0 0 auto; min-width: auto; }
+        .plot-item img { max-width: 100%; display: block; height: auto; margin: 0 auto; padding: 10px; }
+
+        .hidden { display: none; }
     </style>
 </head>
 <body>
 
-<h1>Fisher's Farm: 収穫シミュレーション</h1>
-<div id="status">Python読み込み中...</div>
-
 <div id="main-container">
-    <div class="panel">
-        <h3>1. 植え付けアルゴリズム設定</h3>
-        <textarea id="python-code">
+    <div class="left-side">
+        <div class="tab-container">
+            <div id="tab-plant" class="tab active" onclick="switchTab('plant')">🌱 1. 実験計画</div>
+            <div id="tab-analyze" class="tab" onclick="switchTab('analyze')">📊 2. データ分析</div>
+        </div>
+        
+        <div class="editor-wrapper">
+            <div id="editor-plant-box">
+                <textarea id="code-plant">
+# --- 植え付けフェーズ ---
 import numpy as np
 
-def decide_planting(farm_data):
-    # farm_data: 各マスの環境設定が入った辞書のリスト
-    plan = []
-    for plot in farm_data:
-        # 戦略を記述（例：ランダムに植える）
-        variety = np.random.choice(['A', 'B', 'C'])
-        plan.append(variety)
-    return plan
+for y in range(8):
+    for x in range(8):
+        # 戦略を記述
+        farm[y][x].variety = np.random.choice(['A', 'B', 'C'])
+                </textarea>
+            </div>
+            <div id="editor-analyze-box" class="hidden">
+                <textarea id="code-analyze">
+# --- 分析フェーズ ---
+import matplotlib.pyplot as plt
+import numpy as np
 
-def calculate_harvest(plot):
-    # 各マスの収穫量を計算するロジック
-    # plot['variety']: 品種, plot['is_sunny']: 日当たり, plot['is_water']: 水辺
-    
-    base = 50.0
-    v = plot['variety']
-    
-    # 品種ごとの基本特性
-    effects = {'A': 10, 'B': 25, 'C': 5}
-    res = base + effects.get(v, 0)
-    
-    # 環境との相互作用 (Interaction)
-    if v == 'B' and plot['is_water']:
-        res -= 35  # 品種Bは水辺に極端に弱い（根腐れ）
-    elif v == 'B' and plot['is_sunny']:
-        res += 10  # 品種Bは日向で本領発揮
-    
-    # 統計的ノイズ (平均0, 標準偏差5の正規分布)
-    noise = np.random.normal(0, 5)
-    
-    return round(res + noise, 2)
-        </textarea>
-        
+data = { v: [p.yield_val for row in farm for p in row if p.variety == v] for v in ['A', 'B', 'C'] }
+
+print("【統計レポート】")
+for v in ['A', 'B', 'C']:
+    if data[v]:
+        print(f"品種{v} 平均収量: {np.mean(data[v]):.2f}")
+
+plt.figure(figsize=(6, 4))
+plt.boxplot([data[v] for v in ['A', 'B', 'C'] if data[v]], labels=[v for v in ['A', 'B', 'C'] if data[v]])
+plt.ylabel("Yield")
+plt.title("Yield Analysis")
+plt.show()
+                </textarea>
+            </div>
+        </div>
+
         <div class="controls">
-            <button id="plant-btn" onclick="executePlanting()" disabled>植え付け実行</button>
-            <button id="harvest-btn" onclick="executeHarvest()" disabled>収穫する！</button>
+            <button id="plant-btn" class="btn-plant" onclick="executePlanting()" disabled>植え付け実行</button>
+            <button id="harvest-btn" class="btn-harvest" onclick="executeHarvest()" disabled>収穫シミュレーション</button>
+            <button id="csv-btn" class="btn-csv hidden" onclick="downloadCSV()">CSV保存</button>
+            <button id="analyze-btn" class="btn-analyze hidden" onclick="executeAnalysis()">分析実行</button>
         </div>
     </div>
 
-    <div class="panel">
-        <h3>2. 農園盤面</h3>
-        <div id="farm-grid"></div>
-        <div id="log-panel">ここに収穫ログが表示されます...</div>
+    <div class="right-side">
+        <div class="panel">
+            <h3 style="margin-top:0">Farm Field Map</h3>
+            <div id="farm-grid"></div>
+            <div id="console">Loading System...</div>
+        </div>
+        <div class="panel">
+            <h3 style="margin-top:0">Data Visualization</h3>
+            <div id="plot-area"></div>
+        </div>
     </div>
 </div>
 
 <script>
     let pyodide;
-    const GRID_SIZE = 8;
-    let farmPlots = [];
+    let editorPlant, editorAnalyze;
+    let hasHarvested = false;
 
     async function setup() {
         pyodide = await loadPyodide();
-        await pyodide.loadPackage("numpy");
-        document.getElementById('status').innerText = "✅ Python準備完了";
+        await pyodide.loadPackage(["numpy", "matplotlib"]);
+        
+        await pyodide.runPythonAsync(`
+import numpy as np
+import matplotlib.pyplot as plt
+import io, base64, sys, csv
+
+class Plot:
+    def __init__(self, x, y, is_sunny, is_water):
+        self.x, self.y = x, y
+        self.is_sunny, self.is_water = is_sunny, is_water
+        self.variety = None
+        self.yield_val = 0.0
+
+farm = [[Plot(x, y, y < 4, x < 2) for x in range(8)] for y in range(8)]
+
+def internal_calc_yield(p):
+    if not p.variety: return 0.0
+    res = 50.0 + {'A': 10, 'B': 25, 'C': 5}[p.variety]
+    if p.variety == 'B':
+        if p.is_water: res -= 40
+        if p.is_sunny: res += 10
+    return round(max(0, res + np.random.normal(0, 5)), 1)
+
+def generate_csv():
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['index', 'variety', 'is_sunny', 'is_water', 'yield'])
+    idx = 0
+    for row in farm:
+        for p in row:
+            writer.writerow([idx, p.variety, p.is_sunny, p.is_water, p.yield_val])
+            idx += 1
+    return output.getvalue()
+        `);
+
+        const editorConfig = { mode: "python", theme: "dracula", lineNumbers: true, indentUnit: 4 };
+        editorPlant = CodeMirror.fromTextArea(document.getElementById('code-plant'), editorConfig);
+        editorAnalyze = CodeMirror.fromTextArea(document.getElementById('code-analyze'), editorConfig);
+
+        document.getElementById('console').innerText = "✅ Ready";
         document.getElementById('plant-btn').disabled = false;
-        initFarm();
+        initGrid();
     }
 
-    function initFarm() {
-        farmPlots = [];
-        const gridEl = document.getElementById('farm-grid');
-        gridEl.innerHTML = '';
+    function switchTab(tab) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.getElementById(`tab-${tab}`).classList.add('active');
         
-        for (let y = 0; y < GRID_SIZE; y++) {
-            for (let x = 0; x < GRID_SIZE; x++) {
-                const plot = {
-                    id: y * GRID_SIZE + x,
-                    is_sunny: y < 4,
-                    is_water: x < 2,
-                    variety: null,
-                    yield: null
-                };
-                farmPlots.push(plot);
-                
-                const cell = document.createElement('div');
-                cell.id = `cell-${plot.id}`;
-                cell.className = `cell ${plot.is_sunny ? 'sunny' : 'shady'} ${plot.is_water ? 'water-edge' : ''}`;
-                gridEl.appendChild(cell);
-            }
+        document.getElementById('editor-plant-box').classList.toggle('hidden', tab !== 'plant');
+        document.getElementById('editor-analyze-box').classList.toggle('hidden', tab !== 'analyze');
+        
+        document.getElementById('plant-btn').classList.toggle('hidden', tab !== 'plant');
+        document.getElementById('harvest-btn').classList.toggle('hidden', tab !== 'plant');
+        document.getElementById('analyze-btn').classList.toggle('hidden', tab !== 'analyze');
+        
+        // CSV保存ボタン：実験計画タブかつ収穫済みの場合のみ表示
+        const csvBtn = document.getElementById('csv-btn');
+        if (tab === 'plant' && hasHarvested === true) {
+            csvBtn.classList.remove('hidden');
+        } else {
+            csvBtn.classList.add('hidden');
+        }
+
+        if(tab === 'plant') editorPlant.refresh(); else editorAnalyze.refresh();
+    }
+
+    function updateCellUI(y, x, variety, yieldVal) {
+        const cell = document.getElementById(`cell-${y}-${x}`);
+        const pos = (y < 3) ? 'bottom' : 'top';
+        const tooltipHtml = `<b>farm[${y}][${x}]</b><br>• 日当たり: ${y < 4 ? '☀️' : '☁️'}<br>• 地形: ${x < 2 ? '💧' : '🏞️'}<br>• 品種: ${variety || '-'}<br>• 収穫量: ${yieldVal || '-'}`;
+        cell.innerHTML = `<span>${variety || ''}</span>${yieldVal ? `<span class="yield-val">${yieldVal}</span>` : ''}<div class="tooltip ${pos}">${tooltipHtml}</div>`;
+    }
+
+    function initGrid() {
+        const grid = document.getElementById('farm-grid');
+        grid.innerHTML = '';
+        for(let i=0; i<64; i++) {
+            const y = Math.floor(i/8), x = i%8;
+            const div = document.createElement('div');
+            div.id = `cell-${y}-${x}`;
+            div.className = `cell ${y<4?'sunny':'shady'} ${x<2?'water-edge':''}`;
+            grid.appendChild(div);
+            updateCellUI(y, x, null, null);
         }
     }
 
     async function executePlanting() {
-        const code = document.getElementById('python-code').value;
         try {
-            pyodide.globals.set("js_farm_data", farmPlots);
-            await pyodide.runPythonAsync(code);
-            
-            const plan = pyodide.runPython("decide_planting(js_farm_data.to_py())").toJs();
-            
-            farmPlots.forEach((p, i) => {
-                p.variety = plan[i];
-                p.yield = null; // 植え付け時は収穫量をリセット
-                const el = document.getElementById(`cell-${i}`);
-                el.innerHTML = `<span>${p.variety}</span>`;
-            });
-            
+            await pyodide.runPythonAsync(editorPlant.getValue());
+            for(let y=0; y<8; y++) for(let x=0; x<8; x++) updateCellUI(y, x, pyodide.runPython(`farm[${y}][${x}].variety`), null);
             document.getElementById('harvest-btn').disabled = false;
-            document.getElementById('log-panel').innerText = "植え付け完了。収穫ボタンを押して結果を確認してください。";
-        } catch (e) { alert(e); }
+            log("植え付け完了。");
+        } catch (e) { log("Error: " + e); }
     }
 
     async function executeHarvest() {
-        let totalYield = 0;
-        let logs = ["【収穫データ】"];
-        
-        farmPlots.forEach((p, i) => {
-            // 各マスのデータをPythonに渡して計算
-            pyodide.globals.set("current_plot", p);
-            const y = pyodide.runPython("calculate_harvest(current_plot.to_py())");
-            
-            p.yield = y;
-            totalYield += y;
-            
-            // 盤面表示を更新
-            const el = document.getElementById(`cell-${i}`);
-            el.innerHTML = `<span>${p.variety}</span><span class="yield-badge">${y}</span>`;
-            logs.push(`地点${i}(${p.variety}): ${y}`);
-        });
-
-        document.getElementById('log-panel').innerText = 
-            `合計収穫量: ${totalYield.toFixed(2)}\n平均収穫量: ${(totalYield/64).toFixed(2)}\n\n` + logs.join("\n");
+        try {
+            pyodide.runPython(`for row in farm:
+    for p in row: p.yield_val = internal_calc_yield(p)`);
+            for(let y=0; y<8; y++) for(let x=0; x<8; x++) updateCellUI(y, x, pyodide.runPython(`farm[${y}][${x}].variety`), pyodide.runPython(`farm[${y}][${x}].yield_val`));
+            hasHarvested = true;
+            document.getElementById('csv-btn').classList.remove('hidden');
+            log("収穫完了！「実験計画」タブのCSV保存ボタンが有効になりました。");
+        } catch (e) { log("Error: " + e); }
     }
 
+    async function executeAnalysis() {
+        log("分析実行中...");
+        pyodide.runPython(`sys.stdout = io.StringIO()`);
+        try {
+            await pyodide.runPythonAsync(editorAnalyze.getValue());
+            log(pyodide.runPython("sys.stdout.getvalue()") || "分析完了");
+
+            const imgStr = pyodide.runPython(`
+if plt.get_fignums():
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close()
+    base64.b64encode(buf.getvalue()).decode('utf-8')
+else: ""
+            `);
+            if(imgStr) {
+                const plotArea = document.getElementById('plot-area');
+                
+                const item = document.createElement('div');
+                item.className = 'plot-item';
+                
+                const actions = document.createElement('div');
+                actions.className = 'plot-actions';
+                
+                // 削除ボタン (赤色)
+                const delBtn = document.createElement('button');
+                delBtn.className = 'plot-btn-del';
+                delBtn.innerText = 'このグラフを削除';
+                delBtn.onclick = () => item.remove();
+                
+                // PNG保存ボタン (紺色)
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'plot-btn-save';
+                saveBtn.innerText = 'PNGとして保存';
+                saveBtn.onclick = () => {
+                    const link = document.createElement('a');
+                    link.href = `data:image/png;base64,${imgStr}`;
+                    link.download = `plot_${new Date().getTime()}.png`;
+                    link.click();
+                };
+
+                actions.appendChild(delBtn);
+                actions.appendChild(saveBtn);
+                
+                const img = document.createElement('img');
+                img.src = `data:image/png;base64,${imgStr}`;
+                
+                item.appendChild(actions);
+                item.appendChild(img);
+                plotArea.appendChild(item);
+                item.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            }
+        } catch (e) { log("❌ Error:\n" + e); }
+    }
+
+    function downloadCSV() {
+        const csvContent = pyodide.runPython("generate_csv()");
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "fisher_farm_data.csv";
+        link.click();
+    }
+
+    function log(m) { document.getElementById('console').innerText = m; }
     setup();
 </script>
 </body>
