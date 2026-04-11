@@ -59,7 +59,7 @@
                 <input type="range" id="speed" min="0" max="500" step="10" value="100">
                 <span id="speed-val">100</span>
             </div>
-            <div class="stats-box" id="stats">Episode: 0<br>Cumulative Rate: 0<br>Q-Table Nodes: 0</div>
+            <div class="stats-box" id="stats">Episode: 0<br>Cumulative Score: 0<br>Q-Table Nodes: 0</div>
         </div>
         <div id="chart-container"><canvas id="winRateChart"></canvas></div>
     </div>
@@ -141,7 +141,7 @@
                     let def_p = this.get_deformed_board(this.data[k_str], op);
 
                     if (result === 0) def_p[pos] += 0; else if (this.role === result) def_p[pos] += 1; else def_p[pos] -= 1;
-
+                    if (next_max < -1) def_p[pos] = -10;
 
                     let v = []; for(let i=0; i<9; i++) if(def_b[i] === 0) v.push(i);
                     next_max = v.length > 0 ? Math.max(...v.map(i => def_p[i])) : 0;
@@ -200,15 +200,22 @@
             else { btn.innerText = '⏸ Pause'; btn.classList.remove('paused'); trainingLoop(); }
         }
 
-        function updateChartAndStats() {
-            chart.data.labels.push(episode);
-            chart.data.datasets[0].data.push(cumulative_score);
-            if (chart.data.labels.length > 200) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-            }
+        // 🚀 チャートのUIと数値を更新する関数
+        function updateUI() {
             chart.update();
-            document.getElementById('stats').innerHTML = `Episode: ${episode}<br>Cumulative Rate: ${cumulative_score}<br>Q-Table Nodes: ${all_boards_set.size}`;
+            document.getElementById('stats').innerHTML = `Episode: ${episode}<br>Cumulative Score: ${cumulative_score}<br>Q-Table Nodes: ${all_boards_set.size}`;
+        }
+
+        // 🚀 10エピソードに1回、チャートに点を打つ関数（どのスピードでも絶対固定）
+        function recordChartData() {
+            if (episode % 1 === 0) {
+                chart.data.labels.push(episode);
+                chart.data.datasets[0].data.push(cumulative_score);
+                if (chart.data.labels.length > 200) {
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+            }
         }
 
         function trainingLoop() {
@@ -216,7 +223,7 @@
 
             try {
                 if (window.learningSpeed === 0) {
-                    // 超高速モード
+                    // ====== 爆速モード ======
                     let batchSize = 50; 
                     let isTopologyDirty = false;
                     
@@ -237,6 +244,9 @@
                         agent1.learn(game.result); agent2.learn(game.result);
                         cumulative_score += (game.result === 1 ? 1 : (game.result === -1 ? -1 : 0));
                         episode++;
+                        
+                        // 必ず10エピソードに1回記録
+                        recordChartData();
 
                         for (let i = 0; i < history.length; i++) {
                             let nId = history[i];
@@ -245,7 +255,6 @@
                             
                             if (i > 0) {
                                 let pId = history[i-1];
-                                // 🚀【修正】自己ループ（循環）を確実にブロックする安全装置
                                 if (pId !== nId) {
                                     let lId = `${pId}->${nId}`;
                                     if (!linkSet.has(lId)) { linkSet.add(lId); gData.links.push({ source: pId, target: nId }); isTopologyDirty = true; }
@@ -254,13 +263,14 @@
                         }
                     }
 
-                    updateChartAndStats();
-
+                    // バッチ処理が終わった後にUIを一度だけ更新（画面のちらつき防止）
+                    updateUI();
                     if (isTopologyDirty) { Graph.graphData({ nodes: gData.nodes, links: gData.links }); }
+                    
                     requestAnimationFrame(trainingLoop);
 
                 } else {
-                    // 通常・低速モード
+                    // ====== 通常・低速モード ======
                     let isTopologyDirty = false;
 
                     if (!isPlayingGame) {
@@ -281,7 +291,6 @@
                     
                     if (currentPathHistory.length > 1) {
                         let pId = currentPathHistory[currentPathHistory.length - 2];
-                        // 🚀【修正】自己ループ（循環）を確実にブロックする安全装置
                         if (pId !== sb_str) {
                             let lId = `${pId}->${sb_str}`;
                             currentPathLinks.add(lId);
@@ -298,7 +307,6 @@
                         if (!nodeSet.has(final_sb_str)) { nodeSet.add(final_sb_str); gData.nodes.push({ id: final_sb_str }); isTopologyDirty = true; }
                         
                         let pId = currentPathHistory[currentPathHistory.length - 2];
-                        // 🚀【修正】自己ループ（循環）を確実にブロックする安全装置
                         if (pId !== final_sb_str) {
                             let lId = `${pId}->${final_sb_str}`;
                             currentPathLinks.add(lId);
@@ -309,9 +317,13 @@
                         cumulative_score += (game.result === 1 ? 1 : (game.result === -1 ? -1 : 0));
                         episode++;
 
-                        updateChartAndStats();
+                        // 必ず10エピソードに1回記録
+                        recordChartData();
                         isPlayingGame = false;
                     }
+
+                    // テキストUIは常に最新の状態（現在のエピソード数）を表示する
+                    updateUI();
 
                     if (isTopologyDirty) {
                         Graph.graphData({ nodes: gData.nodes, links: gData.links });
