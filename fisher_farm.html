@@ -209,7 +209,7 @@ def generate_csv():
     function updateCellUI(y, x, variety, yieldVal) {
         const cell = document.getElementById(`cell-${y}-${x}`);
         const pos = (y < 3) ? 'bottom' : 'top';
-        const tooltipHtml = `<b>farm[${y}][${x}]</b><br>プロパティ<br>• is_sunny: ${y < 4 ? '☀️' : '☁️'}<br>• is_water: ${x < 2 ? '💧' : '🏞️'}<br>• variety: ${variety || '-'}<br>• yield_val: ${yield_Val || '-'}`;
+        const tooltipHtml = `<b>farm[${y}][${x}]</b><br>• is_sunny: ${y < 4 ? '☀️' : '☁️'}<br>• is_water: ${x < 2 ? '💧' : '🏞️'}<br>• variety: ${variety || '-'}<br>• yield_val: ${yieldVal || '-'}`;
         cell.innerHTML = `<span>${variety || ''}</span>${yieldVal ? `<span class="yield-val">${yieldVal}</span>` : ''}<div class="tooltip ${pos}">${tooltipHtml}</div>`;
     }
 
